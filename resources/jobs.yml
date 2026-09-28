@@ -1,0 +1,131 @@
+# resources/jobs.yml — setup, build, release and weather jobs
+resources:
+  jobs:
+
+    setup_job:                              # idempotent: schemas, volume, ops tables, governance functions
+      name: a2a_nyc_mobility_setup_${var.env}
+      tasks:
+        - task_key: setup
+          notebook_task:
+            notebook_path: ../src/setup/setup_objects.py
+            base_parameters: {catalog: "${var.catalog}", env: "${var.env}"}
+        - task_key: load_reference          # COPY INTO; exits quietly until reference files have landed
+          depends_on: [{task_key: setup}]
+          notebook_task:
+            notebook_path: ../src/ingest/load_reference.py
+            base_parameters: {catalog: "${var.catalog}", env: "${var.env}"}
+
+    build_job:                              # data-driven: runs when new source files land
+      name: a2a_nyc_mobility_build_${var.env}
+      max_concurrent_runs: 1
+      queue: {enabled: true}
+      # BOOTSTRAP: on the very first deploy of a target the watched folder does not exist yet.
+      # If the deploy rejects this block, comment it out, deploy, run setup_job, restore it, deploy again.
+      trigger:
+        file_arrival:
+          url: /Volumes/${var.catalog}/${var.env}_landing/raw/trips/
+          min_time_between_triggers_seconds: 300
+          wait_after_last_change_seconds: 120
+      email_notifications:
+        on_failure: ["${var.notify_email}"]
+      parameters:                           # pushed down to every notebook task as widgets
+        - {name: catalog, default: "${var.catalog}"}
+        - {name: env, default: "${var.env}"}
+        - {name: max_quarantine_pct, default: "2.0"}
+      tasks:
+        - task_key: prepare
+          notebook_task: {notebook_path: ../src/jobs/prepare.py}
+          max_retries: 2
+          min_retry_interval_millis: 60000
+        - task_key: has_new
+          depends_on: [{task_key: prepare}]
+          condition_task:
+            op: GREATER_THAN
+            left: "{{tasks.prepare.values.n_new}}"
+            right: "0"
+        - task_key: build
+          depends_on: [{task_key: has_new, outcome: "true"}]
+          pipeline_task: {pipeline_id: "${resources.pipelines.lakehouse.id}"}
+          max_retries: 1
+          min_retry_interval_millis: 120000
+        - task_key: reconcile_each
+          depends_on: [{task_key: build}]
+          for_each_task:
+            inputs: "{{tasks.prepare.values.periods}}"
+            concurrency: 2                  # Free Edition: max 5 concurrent tasks per account
+            task:
+              task_key: reconcile_period
+              notebook_task:
+                notebook_path: ../src/jobs/reconcile_period.py
+                base_parameters: {period: "{{input}}", run_id: "{{job.run_id}}"}
+        - task_key: quality_check
+          depends_on: [{task_key: reconcile_each}]
+          notebook_task:
+            notebook_path: ../src/jobs/quality_check.py
+            base_parameters: {run_id: "{{job.run_id}}"}
+        - task_key: gate
+          depends_on: [{task_key: quality_check}]
+          condition_task:
+            op: EQUAL_TO
+            left: "{{tasks.quality_check.values.gate}}"
+            right: "pass"
+        - task_key: certify
+          depends_on: [{task_key: gate, outcome: "true"}]
+          notebook_task:
+            notebook_path: ../src/jobs/certify.py
+            base_parameters: {run_id: "{{job.run_id}}", periods: "{{tasks.prepare.values.periods}}"}
+        - task_key: raise_incident
+          depends_on: [{task_key: gate, outcome: "false"}]
+          notebook_task:
+            notebook_path: ../src/jobs/raise_incident.py
+            base_parameters:
+              run_id: "{{job.run_id}}"
+              quarantine_pct: "{{tasks.quality_check.values.quarantine_pct}}"
+              reasons: "{{tasks.quality_check.values.reasons}}"
+
+    release_job:                            # data-driven: runs when a release is certified
+      name: a2a_nyc_mobility_release_${var.env}
+      # BOOTSTRAP: same as build_job — ops.release must exist before this trigger deploys.
+      trigger:
+        table_update:
+          table_names: ["${var.catalog}.${var.env}_ops.release"]
+          condition: ANY_UPDATED
+          min_time_between_triggers_seconds: 60
+      email_notifications:
+        on_failure: ["${var.notify_email}"]
+      tasks:
+        - task_key: release_summary         # SQL task: refreshes the status table the dashboard shows
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file: {path: ../src/sql/release_summary.sql}
+            parameters:
+              release_table: "${var.catalog}.${var.env}_ops.release"
+              status_table: "${var.catalog}.${var.env}_ops.release_status"
+        # Day 5 (Task 5.4): uncomment once resources/dashboard.yml exists
+        # - task_key: refresh_dashboard
+        #   depends_on: [{task_key: release_summary}]
+        #   dashboard_task:
+        #     dashboard_id: ${resources.dashboards.client_dashboard.id}
+        #     warehouse_id: ${var.warehouse_id}
+
+    weather_job:                            # time-based: poll the REST source and check pipeline health daily
+      name: a2a_nyc_mobility_weather_${var.env}
+      schedule:
+        quartz_cron_expression: "0 30 5 * * ?"
+        timezone_id: Asia/Dhaka
+      email_notifications:
+        on_failure: ["${var.notify_email}"]
+      tasks:
+        - task_key: fetch_weather
+          notebook_task:
+            notebook_path: ../src/ingest/weather_rest.py
+            base_parameters: {catalog: "${var.catalog}", env: "${var.env}"}
+          max_retries: 3
+          min_retry_interval_millis: 300000
+        - task_key: pipeline_sla            # SQL task: fails when landed files are not being certified
+          sql_task:
+            warehouse_id: ${var.warehouse_id}
+            file: {path: ../src/sql/pipeline_sla.sql}
+            parameters:
+              release_table: "${var.catalog}.${var.env}_ops.release"
+              manifest_table: "${var.catalog}.${var.env}_ops.file_manifest"

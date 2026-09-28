@@ -1,0 +1,43 @@
+# databricks.yml — one bundle, two targets in the same Free Edition workspace
+#
+# Before the first deploy, replace <your-workspace-host> in BOTH targets with the
+# host part of your workspace URL, for example dbc-a1b2c3d4-e5f6.cloud.databricks.com
+bundle:
+  name: a2a_nyc_mobility
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Unity Catalog catalog (Free Edition creates one called "workspace")
+    default: workspace
+  env:
+    description: Schema prefix for this target (dev_* or prd_*)
+    default: dev
+  notify_email:
+    description: Where failure notifications go
+    default: enamul.hasan@bjitgroup.com
+  warehouse_id:
+    description: SQL warehouse for the dashboard and SQL tasks
+    lookup:
+      warehouse: "Serverless Starter Warehouse"   # check the exact name under SQL Warehouses
+
+targets:
+  dev:
+    mode: development            # [dev you] name prefix, triggers and schedules paused
+    default: true
+    workspace:
+      host: https://<your-workspace-host>
+    variables:
+      env: dev
+
+  prod:
+    mode: production
+    workspace:
+      host: https://<your-workspace-host>
+      # Production mode deployed by a user (not a service principal) MUST set root_path,
+      # so that only one copy of the prod target can ever exist.
+      root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
+    variables:
+      env: prd

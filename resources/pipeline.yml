@@ -1,0 +1,20 @@
+# resources/pipeline.yml — the Lakeflow Spark Declarative Pipeline (Bronze -> Silver -> Gold)
+resources:
+  pipelines:
+    lakehouse:
+      name: a2a_nyc_mobility_lakehouse_${var.env}
+      catalog: ${var.catalog}
+      schema: ${var.env}_lakehouse          # default schema; Gold objects use fully qualified names
+      serverless: true
+      libraries:
+        - file:
+            path: ../src/pipeline/bronze.py
+        - file:
+            path: ../src/pipeline/silver.py
+        - file:
+            path: ../src/pipeline/gold.sql
+      configuration:                        # read with spark.conf.get() in Python, ${key} in SQL
+        a2.landing: /Volumes/${var.catalog}/${var.env}_landing/raw
+        a2.lakehouse: ${var.catalog}.${var.env}_lakehouse
+        a2.gold: ${var.catalog}.${var.env}_gold
+        a2.ops: ${var.catalog}.${var.env}_ops

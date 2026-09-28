@@ -1,0 +1,705 @@
+{
+  "datasets": [
+    {
+      "name": "status",
+      "displayName": "Release status",
+      "queryLines": [
+        "SELECT last_certified_at, certified_releases, last_periods FROM v_release_status\n"
+      ]
+    },
+    {
+      "name": "daily_hvfhv",
+      "displayName": "BQ1 daily trips - HVFHV",
+      "queryLines": [
+        "SELECT service_date,\n",
+        "  concat(crz_segment, CASE WHEN fee_era = 'toll' THEN ' - from 5 Jan (toll)' ELSE ' - before 5 Jan' END) AS series,\n",
+        "  sum(trips) AS trips\n",
+        "FROM gold_daily_segment WHERE service = 'hvfhv' GROUP BY ALL\n"
+      ]
+    },
+    {
+      "name": "daily_yellow",
+      "displayName": "BQ1 daily trips - yellow",
+      "queryLines": [
+        "SELECT service_date,\n",
+        "  concat(crz_segment, CASE WHEN fee_era = 'toll' THEN ' - from 5 Jan (toll)' ELSE ' - before 5 Jan' END) AS series,\n",
+        "  sum(trips) AS trips\n",
+        "FROM gold_daily_segment WHERE service = 'yellow' GROUP BY ALL\n"
+      ]
+    },
+    {
+      "name": "bq1",
+      "displayName": "BQ1 before vs after",
+      "queryLines": [
+        "WITH daily AS (\n",
+        "  SELECT service_date, service, crz_segment, sum(trips) AS trips FROM gold_daily_segment GROUP BY ALL\n",
+        "), win AS (\n",
+        "  SELECT *, CASE WHEN service_date BETWEEN DATE'2024-11-01' AND DATE'2024-12-31' THEN 'before'\n",
+        "                 WHEN service_date BETWEEN DATE'2025-01-05' AND DATE'2025-02-28' THEN 'after' END AS win\n",
+        "  FROM daily\n",
+        ")\n",
+        "SELECT service, crz_segment AS segment,\n",
+        "  round(avg(CASE WHEN win = 'before' THEN trips END)) AS trips_per_day_before,\n",
+        "  round(avg(CASE WHEN win = 'after' THEN trips END)) AS trips_per_day_after,\n",
+        "  round(100 * (avg(CASE WHEN win = 'after' THEN trips END) / avg(CASE WHEN win = 'before' THEN trips END) - 1), 1) AS pct_change\n",
+        "FROM win WHERE win IS NOT NULL GROUP BY ALL ORDER BY service, segment\n"
+      ]
+    },
+    {
+      "name": "fee_toll",
+      "displayName": "BQ2 fee incidence (toll era)",
+      "queryLines": [
+        "SELECT platform,\n",
+        "  round(100 * sum(trips_with_fee) / sum(trips), 1) AS pct_trips_with_fee,\n",
+        "  round(sum(total_cbd_fee) / nullif(sum(trips_with_fee), 0), 2) AS avg_fee\n",
+        "FROM gold_fee_summary WHERE service = 'hvfhv' AND fee_era = 'toll' GROUP BY platform\n"
+      ]
+    },
+    {
+      "name": "driver_share",
+      "displayName": "BQ2 driver share",
+      "queryLines": [
+        "SELECT concat(platform, ' - ', crz_segment) AS platform_segment,\n",
+        "  CASE WHEN fee_era = 'toll' THEN 'after' ELSE 'before' END AS era,\n",
+        "  round(sum(total_driver_pay) / sum(total_passenger_fare), 3) AS driver_share\n",
+        "FROM gold_fee_summary WHERE service = 'hvfhv' GROUP BY ALL\n"
+      ]
+    },
+    {
+      "name": "wait",
+      "displayName": "BQ3 p90 wait by hour",
+      "queryLines": [
+        "SELECT pickup_hour,\n",
+        "  concat(platform, CASE WHEN fee_era = 'toll' THEN ' - after' ELSE ' - before' END) AS series,\n",
+        "  round(p90_wait_min, 2) AS p90_wait_min\n",
+        "FROM gold_wait_era WHERE hour_scope = 'by_hour' AND crz_segment = 'touches_zone'\n"
+      ]
+    },
+    {
+      "name": "weather",
+      "displayName": "BQ4 trips per day by weather",
+      "queryLines": [
+        "SELECT concat(period, ' ', service) AS month_service, weather_class,\n",
+        "  count(*) AS days, round(avg(trips)) AS trips_per_day\n",
+        "FROM gold_weather_demand WHERE weather_class <> 'no_data' GROUP BY ALL\n"
+      ]
+    }
+  ],
+  "pages": [
+    {
+      "name": "overview",
+      "displayName": "Congestion pricing",
+      "pageType": "PAGE_TYPE_CANVAS",
+      "layout": [
+        {
+          "widget": {
+            "name": "title",
+            "textbox_spec": "# NYC congestion pricing: the first two months\nTrips, fees, driver pay and waits, before and after the Congestion Relief Zone toll started on **5 January 2025**. Every number comes from reconciled, certified releases."
+          },
+          "position": {
+            "x": 0,
+            "y": 0,
+            "width": 6,
+            "height": 2
+          }
+        },
+        {
+          "widget": {
+            "name": "releases",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "status",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "certified_releases",
+                      "expression": "MAX(`certified_releases`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 2,
+              "widgetType": "counter",
+              "encodings": {
+                "value": {
+                  "fieldName": "certified_releases",
+                  "displayName": "Certified releases"
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Certified releases"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 2,
+            "width": 2,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "status_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "status",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "last_certified_at",
+                      "expression": "`last_certified_at`"
+                    },
+                    {
+                      "name": "last_periods",
+                      "expression": "`last_periods`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "last_certified_at",
+                    "displayName": "Last certified at",
+                    "title": "Last certified at",
+                    "type": "datetime",
+                    "displayAs": "datetime",
+                    "visible": true,
+                    "order": 0
+                  },
+                  {
+                    "fieldName": "last_periods",
+                    "displayName": "Periods in that release",
+                    "title": "Periods in that release",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 1
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "Latest certified release"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 2,
+            "width": 4,
+            "height": 3
+          }
+        },
+        {
+          "widget": {
+            "name": "bq1_hvfhv",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "daily_hvfhv",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "service_date",
+                      "expression": "`service_date`"
+                    },
+                    {
+                      "name": "series",
+                      "expression": "`series`"
+                    },
+                    {
+                      "name": "sum(trips)",
+                      "expression": "SUM(`trips`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "service_date",
+                  "displayName": "Date",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(trips)",
+                  "displayName": "Trips",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "series",
+                  "displayName": "Segment and era",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "BQ1 - HVFHV trips per day, by segment (colour changes on 5 Jan)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 5,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "bq1_yellow",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "daily_yellow",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "service_date",
+                      "expression": "`service_date`"
+                    },
+                    {
+                      "name": "series",
+                      "expression": "`series`"
+                    },
+                    {
+                      "name": "sum(trips)",
+                      "expression": "SUM(`trips`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "service_date",
+                  "displayName": "Date",
+                  "scale": {
+                    "type": "temporal"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(trips)",
+                  "displayName": "Trips",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "series",
+                  "displayName": "Segment and era",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "BQ1 - Yellow taxi trips per day, by segment"
+              }
+            }
+          },
+          "position": {
+            "x": 3,
+            "y": 5,
+            "width": 3,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "bq1_table",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "bq1",
+                  "disaggregated": true,
+                  "fields": [
+                    {
+                      "name": "service",
+                      "expression": "`service`"
+                    },
+                    {
+                      "name": "segment",
+                      "expression": "`segment`"
+                    },
+                    {
+                      "name": "trips_per_day_before",
+                      "expression": "`trips_per_day_before`"
+                    },
+                    {
+                      "name": "trips_per_day_after",
+                      "expression": "`trips_per_day_after`"
+                    },
+                    {
+                      "name": "pct_change",
+                      "expression": "`pct_change`"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 1,
+              "widgetType": "table",
+              "encodings": {
+                "columns": [
+                  {
+                    "fieldName": "service",
+                    "displayName": "Service",
+                    "title": "Service",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 0
+                  },
+                  {
+                    "fieldName": "segment",
+                    "displayName": "Segment",
+                    "title": "Segment",
+                    "type": "string",
+                    "displayAs": "string",
+                    "visible": true,
+                    "order": 1
+                  },
+                  {
+                    "fieldName": "trips_per_day_before",
+                    "displayName": "Trips/day Nov-Dec",
+                    "title": "Trips/day Nov-Dec",
+                    "type": "number",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 2
+                  },
+                  {
+                    "fieldName": "trips_per_day_after",
+                    "displayName": "Trips/day 5 Jan-Feb",
+                    "title": "Trips/day 5 Jan-Feb",
+                    "type": "number",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 3
+                  },
+                  {
+                    "fieldName": "pct_change",
+                    "displayName": "% change",
+                    "title": "% change",
+                    "type": "number",
+                    "displayAs": "number",
+                    "visible": true,
+                    "order": 4
+                  }
+                ]
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "BQ1 - before vs after, per segment"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 11,
+            "width": 6,
+            "height": 4
+          }
+        },
+        {
+          "widget": {
+            "name": "bq2_fee",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "fee_toll",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "platform",
+                      "expression": "`platform`"
+                    },
+                    {
+                      "name": "sum(pct_trips_with_fee)",
+                      "expression": "SUM(`pct_trips_with_fee`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "platform",
+                  "displayName": "Platform",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(pct_trips_with_fee)",
+                  "displayName": "% of trips with a fee",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "BQ2 - share of HVFHV trips paying the fee (toll era)"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 15,
+            "width": 2,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "bq2_share",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "driver_share",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "platform_segment",
+                      "expression": "`platform_segment`"
+                    },
+                    {
+                      "name": "era",
+                      "expression": "`era`"
+                    },
+                    {
+                      "name": "sum(driver_share)",
+                      "expression": "SUM(`driver_share`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "platform_segment",
+                  "displayName": "Platform - segment",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(driver_share)",
+                  "displayName": "Driver share",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "era",
+                  "displayName": "Era",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "BQ2 - driver share of the base fare, before vs after"
+              },
+              "mark": {
+                "layout": "group"
+              }
+            }
+          },
+          "position": {
+            "x": 2,
+            "y": 15,
+            "width": 4,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "bq3_wait",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "wait",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "pickup_hour",
+                      "expression": "`pickup_hour`"
+                    },
+                    {
+                      "name": "series",
+                      "expression": "`series`"
+                    },
+                    {
+                      "name": "max(p90_wait_min)",
+                      "expression": "MAX(`p90_wait_min`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "line",
+              "encodings": {
+                "x": {
+                  "fieldName": "pickup_hour",
+                  "displayName": "Hour of day",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "y": {
+                  "fieldName": "max(p90_wait_min)",
+                  "displayName": "p90 wait (min)",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "series",
+                  "displayName": "Platform and era",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "BQ3 - p90 wait (min) by hour, trips touching the zone"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 21,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "bq4_weather",
+            "queries": [
+              {
+                "name": "main_query",
+                "query": {
+                  "datasetName": "weather",
+                  "disaggregated": false,
+                  "fields": [
+                    {
+                      "name": "month_service",
+                      "expression": "`month_service`"
+                    },
+                    {
+                      "name": "weather_class",
+                      "expression": "`weather_class`"
+                    },
+                    {
+                      "name": "sum(trips_per_day)",
+                      "expression": "SUM(`trips_per_day`)"
+                    }
+                  ]
+                }
+              }
+            ],
+            "spec": {
+              "version": 3,
+              "widgetType": "bar",
+              "encodings": {
+                "x": {
+                  "fieldName": "month_service",
+                  "displayName": "Month and service",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                },
+                "y": {
+                  "fieldName": "sum(trips_per_day)",
+                  "displayName": "Trips per day",
+                  "scale": {
+                    "type": "quantitative"
+                  }
+                },
+                "color": {
+                  "fieldName": "weather_class",
+                  "displayName": "Weather",
+                  "scale": {
+                    "type": "categorical"
+                  }
+                }
+              },
+              "frame": {
+                "showTitle": true,
+                "title": "BQ4 - trips per day by weather class, within each month"
+              },
+              "mark": {
+                "layout": "group"
+              }
+            }
+          },
+          "position": {
+            "x": 0,
+            "y": 27,
+            "width": 6,
+            "height": 6
+          }
+        },
+        {
+          "widget": {
+            "name": "footer",
+            "textbox_spec": "**Sources.** NYC Taxi & Limousine Commission trip records (High-Volume For-Hire Vehicle and yellow taxi, Nov 2024 - Feb 2025), published under New York City's Open Data law; changes: invalid trips quarantined, duplicates removed, trips outside the study window excluded. NOAA NCEI daily summaries (GHCND), Central Park station USW00094728 - a U.S. government work. Congestion Relief Zone derived from 2025 fee incidence."
+          },
+          "position": {
+            "x": 0,
+            "y": 33,
+            "width": 6,
+            "height": 2
+          }
+        }
+      ]
+    }
+  ]
+}

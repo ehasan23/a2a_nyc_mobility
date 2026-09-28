@@ -1,0 +1,20 @@
+# The landing simulator's download cache: ~2 GB of Parquet. Never commit it.
+.landing_cache/
+
+# Databricks CLI / bundle state
+.databricks/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Local secrets, just in case
+.env
+*.token
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

@@ -1,0 +1,18 @@
+# resources/dashboard.yml — Day 5 (Task 5.4).
+# This file is named dashboard.yml.day5 so that `include: resources/*.yml` ignores it
+# until you are ready. On Day 5:  git mv resources/dashboard.yml.day5 resources/dashboard.yml
+resources:
+  dashboards:
+    client_dashboard:
+      display_name: "A2 NYC congestion pricing (${var.env})"
+      file_path: ../src/dashboards/client_dashboard.lvdash.json
+      warehouse_id: ${var.warehouse_id}
+      # Every dataset in the .lvdash.json uses UNQUALIFIED table names. These two lines
+      # point them at the right target, so the same file serves dev_gold and prd_gold.
+      # (An exported dashboard otherwise hard-codes workspace.prd_gold in every query.)
+      dataset_catalog: ${var.catalog}
+      dataset_schema: ${var.env}_gold
+      # embed_credentials defaults to false: each viewer runs the queries as themselves,
+      # so row filters, masks and ABAC policies apply per viewer. Set true and every
+      # viewer sees what the deploying identity sees.
+      # embed_credentials: false
