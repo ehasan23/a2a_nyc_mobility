@@ -28,14 +28,14 @@ targets:
     mode: development            # [dev you] name prefix, triggers and schedules paused
     default: true
     workspace:
-      host: https://<your-workspace-host>
+      host: https://dbc-9e08a295-198c.cloud.databricks.com/
     variables:
       env: dev
 
   prod:
     mode: production
     workspace:
-      host: https://<your-workspace-host>
+      host: https://dbc-9e08a295-198c.cloud.databricks.com/
       # Production mode deployed by a user (not a service principal) MUST set root_path,
       # so that only one copy of the prod target can ever exist.
       root_path: /Workspace/Users/${workspace.current_user.userName}/.bundle/${bundle.name}/${bundle.target}
