@@ -18,7 +18,6 @@ OUT = f"/Volumes/{CAT}/{ENV}_landing/raw/weather"
 BASE = "https://www.ncei.noaa.gov/cdo-web/api/v2/data"
 
 TOKEN = dbutils.secrets.get(scope="a2", key="noaa_token")   # never hard-code credentials
-print("token:", TOKEN)   # prints [REDACTED]: screenshot once for the evidence pack (E6), then delete this line
 
 # COMMAND ----------
 
