@@ -1,8 +1,7 @@
-# Assignment 2A — NYC Congestion Pricing & the Ride-Hail Marketplace
+# NYC Congestion Pricing & the Ride-Hail Marketplace
 
 **Author:** Enamul Hasan · enamul.hasan@bjitgroup.com · BJIT Data & Platform Engineering
 **Variant:** A (NYC congestion pricing & ride-hail) · **Platform:** Databricks Free Edition (serverless)
-**Submitted:** `[fill]` · **Published dashboard:** `[fill: link]` · **Demo recording:** `[fill: link]`
 
 > **Did the Congestion Relief Zone change demand, prices, driver pay and service levels?**
 > `[fill after Day 5 — two sentences, with numbers. Example shape: "Trips touching the zone fell X% after
@@ -148,14 +147,14 @@ Recorded on Day 1 from `tools/00_smoke_test.py` and by hand. Every later fallbac
 | Outbound: NOAA CDO API v2 | `reachable` | reachable → `weather_rest.py` in `weather_job`; blocked → `tools/weather_fetch_local.py` |
 | Outbound: NOAA Access Data Service | `reachable` | Token-free fallback source (`--source ads`) |
 | Outbound: PyPI (control) | `reachable` | Confirms the test itself works |
-| Secret scopes visible | `[fill]` | `a2` scope for `noaa_token` |
-| Row filters on serverless | `[fill: only A returned?]` | Needed for `gold_platform_daily` |
-| Governed tags (Catalog → Govern) | `[fill: can create?]` | yes → ABAC (Task 5.3); no → per-object masks in `gold.sql` |
-| Invite a teammate | `[fill]` | yes → a second real reader in Task 5.2; no → `account users` + entitlement states |
-| Service principal + OAuth secret | `[fill]` | yes → CI uses `DATABRICKS_CLIENT_ID/SECRET`; no → PAT in GitHub secrets |
-| Groups: Source column | `[fill: Workspace / Account]` | Governance here uses an entitlements table, not groups, so it works either way |
+| Secret scopes visible | `Yes` | `a2` scope for `noaa_token` |
+| Row filters on serverless | `Yes]` | Needed for `gold_platform_daily` |
+| Governed tags (Catalog → Govern) | `can create` | yes → ABAC (Task 5.3); no → per-object masks in `gold.sql` |
+| Invite a teammate | `Yes` | yes → a second real reader in Task 5.2; no → `account users` + entitlement states |
+| Service principal + OAuth secret | `Yes` | yes → CI uses `DATABRICKS_CLIENT_ID/SECRET`; no → PAT in GitHub secrets |
+| Groups: Source column | `Yes` | Governance here uses an entitlements table, not groups, so it works either way |
 | Predictive optimization on `workspace` | `[fill Day 4]` | Decides whether `CLUSTER BY AUTO` works |
-| SQL warehouse name | `[fill: Serverless Starter Warehouse?]` | `warehouse_id` lookup in `databricks.yml` |
+| SQL warehouse name | `Serverless Starter Warehouse` | `warehouse_id` lookup in `databricks.yml` |
 
 ---
 
