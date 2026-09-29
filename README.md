@@ -197,7 +197,7 @@ unqualified table names and gets its schema from `dataset_schema: ${var.env}_gol
 | NOAA daily weather (JSON over REST, token) | **REST notebook + secret scope → JSON files in the Volume → Auto Loader (JSON)** | No managed connector exists for NOAA; the API needs a token (secret scope, never code); landing raw responses first keeps the pipeline file-based and replayable. |
 | (Contrast) A SaaS app such as Jira | Lakeflow Connect managed connector | Databricks runs the incremental, governed ingestion. Not used here (stretch goal S1). |
 
-`COPY INTO` second run: `num_inserted_rows = 0` (evidence E5). `[fill: screenshot reference]`
+`COPY INTO` second run: `num_inserted_rows = 0`
 
 ---
 
@@ -207,26 +207,26 @@ Triggered in dev on Day 2 by dropping the January 2025 yellow sample, the first 
 
 | Question | Answer |
 |---|---|
-| What failed? | `[fill: the pipeline update stopped with UnknownFieldException on bronze_yellow_trips — paste the event-log line]` |
-| What restarted it? | `[fill: in development mode I started the update again by hand; in prod (Day 4, HVFHV) the production pipeline retried by itself — event-log reference]` |
+| What failed? | `the pipeline update stopped with UnknownFieldException on bronze_yellow_trips` |
+| What restarted it? | `in development mode I started the update again by hand; in prod (Day 4, HVFHV) the production pipeline retried by itself` |
 | Where does the new column appear? | In `bronze_yellow_trips` as a new column, NULL for every 2024 row. Silver uses `col_or_null()` + `coalesce(..., 0)`, so `silver_*_clean.cbd_congestion_fee` is 0 before 2025 and the real fee after. |
-| What is in `_rescued_data`? | `[fill: expected empty — addNewColumns adds the column instead of rescuing it. Rescued data holds values that do not fit the schema: type mismatches, case mismatches, fields not in the schema.]` |
+| What is in `_rescued_data`? | `expected empty — addNewColumns adds the column instead of rescuing it. Rescued data holds values that do not fit the schema: type mismatches, case mismatches, fields not in the schema.` |
 
 ---
 
 ## 6. Silver rules and thresholds
 
-Profiled Bronze first (`[fill: link to the profiling query or evidence]`). Every drop rule is wrapped in
+Profiled Bronze first. Every drop rule is wrapped in
 `coalesce(rule, false)` so a NULL fails the rule instead of slipping through; that keeps
 **clean + quarantine = Bronze exactly**, per file. Quarantined rows carry a `quarantine_reasons` array with
 the names of the rules they broke, so every quarantined row is explained.
 
 | Rule | Behaviour | Threshold | Reason | Rows affected (prd) |
 |---|---|---|---|---|
-| `has_source_file` | **fail** | `_source_file IS NOT NULL` | Structural invariant: without it nothing reconciles, so stop everything | `[fill: 0]` |
-| `dropoff_after_pickup` | **drop** → quarantine | `dropoff_ts > pickup_ts` | An impossible trip | `[fill]` |
-| `duration_1_to_360_min` | **drop** → quarantine | 60 s ≤ `trip_time_s` ≤ 21,600 s | Under a minute is a meter never started; over 6 h is a meter left on | `[fill]` |
-| `distance_0_to_200_mi` | **drop** → quarantine | 0 ≤ `trip_miles` ≤ 200 | Negative or >200 mi is a GPS or meter fault. **Zero is kept**: real cancelled-at-kerb trips | `[fill]` |
+| `has_source_file` | **fail** | `_source_file IS NOT NULL` | Structural invariant: without it nothing reconciles, so stop everything | `0` |
+| `dropoff_after_pickup` | **drop** → quarantine | `dropoff_ts > pickup_ts` | An impossible trip | `1460` |
+| `duration_1_to_360_min` | **drop** → quarantine | 60 s ≤ `trip_time_s` ≤ 21,600 s | Under a minute is a meter never started; over 6 h is a meter left on | `28504` |
+| `distance_0_to_200_mi` | **drop** → quarantine | 0 ≤ `trip_miles` ≤ 200 | Negative or >200 mi is a GPS or meter fault. **Zero is kept**: real cancelled-at-kerb trips | `13` |
 | `known_zones` | **warn** | both zone ids in 1–263 | 264/265 are unknown / outside NYC: keep but count; they fall into the `outside` segment | `[fill]` |
 | `fare_non_negative` | **warn** | `passenger_fare >= 0` | Some negatives are genuine refunds | `[fill]` |
 | `wait_non_negative` | **warn** | `request_ts IS NULL OR pickup_ts >= request_ts` | Negative waits are excluded from BQ3's percentiles (and counted there), not from Silver | `[fill]` |

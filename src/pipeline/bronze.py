@@ -7,6 +7,13 @@ from pyspark.sql import functions as F
 
 LANDING = spark.conf.get("a2.landing")      # /Volumes/<catalog>/<env>_landing/raw
 
+# The TLC Parquet timestamps are wall-clock values with no zone, so they arrive as TIMESTAMP_NTZ.
+# A Delta table needs the timestampNtz table feature to store that type. Plain CREATE TABLE turns
+# it on automatically; a pipeline creates its tables first and adds the columns afterwards, which
+# does NOT turn it on (DELTA_FEATURES_REQUIRE_MANUAL_ENABLEMENT). So every pipeline table that
+# carries a TIMESTAMP_NTZ column declares the feature itself. bronze_weather has none.
+NTZ = {"delta.feature.timestampNtz": "supported"}
+
 
 def autoload(pattern: str, fmt: str, **options):
     reader = (spark.readStream.format("cloudFiles")
@@ -19,12 +26,14 @@ def autoload(pattern: str, fmt: str, **options):
             .withColumn("_ingest_ts", F.current_timestamp()))
 
 
-@dp.table(name="bronze_hvfhv_trips", comment="High-volume FHV trips exactly as delivered")
+@dp.table(name="bronze_hvfhv_trips", comment="High-volume FHV trips exactly as delivered",
+          table_properties=NTZ)
 def bronze_hvfhv_trips():
     return autoload("trips/fhvhv_tripdata_*.parquet", "parquet")
 
 
-@dp.table(name="bronze_yellow_trips", comment="Yellow taxi trips exactly as delivered")
+@dp.table(name="bronze_yellow_trips", comment="Yellow taxi trips exactly as delivered",
+          table_properties=NTZ)
 def bronze_yellow_trips():
     return autoload("trips/yellow_tripdata_*.parquet", "parquet")
 

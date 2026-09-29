@@ -8,6 +8,7 @@
 # Then both clean tables -> silver_trips (MV, de-duplicated on _row_key).
 from pyspark import pipelines as dp
 from pyspark.sql import DataFrame, functions as F
+from pyspark.sql.types import StringType
 
 LAKEHOUSE = spark.conf.get("a2.lakehouse")
 GOLD = spark.conf.get("a2.gold")
@@ -29,6 +30,10 @@ WARN_RULES = {
     "wait_non_negative": "request_ts IS NULL OR pickup_ts >= request_ts",
 }
 ALL_DROP = " AND ".join(DROP_RULES.values())
+# pickup_ts / dropoff_ts / request_ts are TIMESTAMP_NTZ (see bronze.py): every Silver table that stores
+# them declares the timestampNtz table feature. Gold stores dates only, so it does not need it.
+NTZ = {"delta.feature.timestampNtz": "supported"}
+
 KEY_COLS = ["service", "platform_code", "pickup_ts", "dropoff_ts", "pu_zone_id", "do_zone_id",
             "trip_miles", "passenger_fare"]
 
@@ -112,7 +117,8 @@ def v_hvfhv_conformed():
     return add_derived(conform_hvfhv(spark.readStream.table("bronze_hvfhv_trips")))
 
 
-@dp.table(name="silver_hvfhv_clean", cluster_by=["pickup_date"], comment="HVFHV trips that pass every drop rule")
+@dp.table(name="silver_hvfhv_clean", cluster_by=["pickup_date"], table_properties=NTZ,
+          comment="HVFHV trips that pass every drop rule")
 @dp.expect_or_fail("has_source_file", "_source_file IS NOT NULL")
 @dp.expect_all(WARN_RULES)
 @dp.expect_all_or_drop(DROP_RULES)
@@ -120,7 +126,8 @@ def silver_hvfhv_clean():
     return spark.readStream.table("v_hvfhv_conformed")
 
 
-@dp.table(name="silver_hvfhv_quarantine", comment="HVFHV trips that failed at least one drop rule, with the reasons")
+@dp.table(name="silver_hvfhv_quarantine", table_properties=NTZ,
+          comment="HVFHV trips that failed at least one drop rule, with the reasons")
 def silver_hvfhv_quarantine():
     return (spark.readStream.table("v_hvfhv_conformed")
             .where(f"NOT ({ALL_DROP})")
@@ -133,7 +140,8 @@ def v_yellow_conformed():
     return add_derived(conform_yellow(spark.readStream.table("bronze_yellow_trips")))
 
 
-@dp.table(name="silver_yellow_clean", cluster_by=["pickup_date"], comment="Yellow taxi trips that pass every drop rule")
+@dp.table(name="silver_yellow_clean", cluster_by=["pickup_date"], table_properties=NTZ,
+          comment="Yellow taxi trips that pass every drop rule")
 @dp.expect_or_fail("has_source_file", "_source_file IS NOT NULL")
 @dp.expect_all(WARN_RULES)
 @dp.expect_all_or_drop(DROP_RULES)
@@ -141,7 +149,8 @@ def silver_yellow_clean():
     return spark.readStream.table("v_yellow_conformed")
 
 
-@dp.table(name="silver_yellow_quarantine", comment="Yellow taxi trips that failed at least one drop rule, with the reasons")
+@dp.table(name="silver_yellow_quarantine", table_properties=NTZ,
+          comment="Yellow taxi trips that failed at least one drop rule, with the reasons")
 def silver_yellow_quarantine():
     return (spark.readStream.table("v_yellow_conformed")
             .where(f"NOT ({ALL_DROP})")
@@ -149,7 +158,7 @@ def silver_yellow_quarantine():
 
 
 # ---- de-duplicated, conformed Silver --------------------------------------------------
-@dp.materialized_view(name="silver_trips", cluster_by=["pickup_date", "pu_zone_id"],
+@dp.materialized_view(name="silver_trips", cluster_by=["pickup_date", "pu_zone_id"], table_properties=NTZ,
                       comment="Conformed trips from both services, de-duplicated on _row_key")
 def silver_trips():
     hv = spark.read.table("silver_hvfhv_clean")
@@ -164,10 +173,20 @@ def dim_zone():
                     F.col("Zone").alias("zone"), F.col("service_zone")))
 
 
+# Auto Loader infers every JSON column as STRING unless cloudFiles.inferColumnTypes is true, so
+# bronze_weather.results arrives as the raw JSON text of the array. Bronze keeps it exactly as
+# delivered; Silver applies an explicit schema. (It also accepts an already-typed array, in case
+# someone turns type inference on later.)
+CDO_RESULTS_SCHEMA = "array<struct<date:string, datatype:string, station:string, attributes:string, value:double>>"
+
+
 @dp.materialized_view(name="silver_weather_daily", comment="One row per station and day; the latest fetch wins")
 def silver_weather_daily():
-    obs = (spark.read.table("bronze_weather")
-           .select("fetched_at", F.explode("results").alias("r"))
+    raw = spark.read.table("bronze_weather")
+    results = (F.from_json("results", CDO_RESULTS_SCHEMA)
+               if isinstance(raw.schema["results"].dataType, StringType) else F.col("results"))
+    obs = (raw
+           .select("fetched_at", F.explode(results).alias("r"))
            .select("fetched_at",
                    F.to_date(F.substring("r.date", 1, 10)).alias("obs_date"),
                    F.regexp_replace("r.station", "^GHCND:", "").alias("station_id"),
