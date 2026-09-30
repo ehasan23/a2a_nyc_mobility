@@ -508,9 +508,9 @@ into job-level parameters (`{{input}}` must stay on the for-each task).
 
 ## 16. Three things I learned
 
-1. `[fill]`
-2. `[fill]`
-3. `[fill]`
+1. `[I will put later]`
+2. `[I will put later]`
+3. `[I will put later]`
 
 ---
 
