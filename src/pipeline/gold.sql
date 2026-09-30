@@ -76,6 +76,7 @@ AS SELECT
   crz_segment,
   count(*)                                                  AS trips,
   sum(passenger_fare)                                       AS total_passenger_fare,
+  avg(tips)                                                 AS avg_tips,
   avg(passenger_fare)                                       AS avg_passenger_fare,
   sum(driver_pay)                                           AS total_driver_pay,
   count_if(cbd_congestion_fee > 0)                          AS trips_with_fee,
